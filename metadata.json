@@ -1,0 +1,6 @@
+{
+  "name": "ViewPipe",
+  "description": "A YouTube client built with NewPipe Extractor",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
