@@ -139,7 +139,10 @@ tasks.register("copyApkToRoot") {
     doLast {
         if (sourceFile.exists()) {
             sourceFile.copyTo(destFile, overwrite = true)
+            val sizeInBytes = destFile.length()
+            val sizeInMb = sizeInBytes.toDouble() / (1024 * 1024)
             println("Successfully copied APK to root: ${destFile.absolutePath}")
+            println("APK File Size: $sizeInBytes bytes (approx. ${String.format("%.2f", sizeInMb)} MB)")
         } else {
             println("Warning: APK file not found at ${sourceFile.absolutePath}")
         }
