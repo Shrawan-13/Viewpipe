@@ -1,4 +1,15 @@
 import java.io.File
+import java.io.StringWriter
+import java.io.PrintWriter
+import java.net.URL
+import java.net.HttpURLConnection
+import java.net.URI
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
+import javax.net.ssl.SSLContext
+import javax.net.ssl.HttpsURLConnection
 
 plugins {
   alias(libs.plugins.android.application)
@@ -46,6 +57,8 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
+      isMinifyEnabled = false
+      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("debugConfig")
     }
   }
@@ -145,6 +158,108 @@ tasks.register("copyApkToRoot") {
             println("APK File Size: $sizeInBytes bytes (approx. ${String.format("%.2f", sizeInMb)} MB)")
         } else {
             println("Warning: APK file not found at ${sourceFile.absolutePath}")
+        }
+    }
+}
+
+tasks.register("uploadApk") {
+    dependsOn("copyApkToRoot")
+
+    doLast {
+        val destFile = File(project.rootDir, "app-debug.apk")
+        val linkFile = File(project.rootDir, "upload_link.txt")
+        val logFile = File(project.rootDir, "upload_log.txt")
+        val logBuilder = StringBuilder()
+
+        fun log(msg: String) {
+            println(msg)
+            logBuilder.append(msg).append("\n")
+        }
+
+        if (!destFile.exists()) {
+            log("Error: APK file does not exist at ${destFile.absolutePath}")
+            logFile.writeText(logBuilder.toString())
+            return@doLast
+        }
+        
+        log("Uploading ${destFile.length()} bytes to file.io using native HttpURLConnection...")
+        try {
+            // Setup trust-all certificate logic just in case system clock/certs are out of sync
+            val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
+                override fun getAcceptedIssuers(): Array<X509Certificate>? = null
+                override fun checkClientTrusted(certs: Array<X509Certificate>?, authType: String?) {}
+                override fun checkServerTrusted(certs: Array<X509Certificate>?, authType: String?) {}
+            })
+            val sc = SSLContext.getInstance("SSL")
+            sc.init(null, trustAllCerts, SecureRandom())
+            HttpsURLConnection.setDefaultSSLSocketFactory(sc.socketFactory)
+            HttpsURLConnection.setDefaultHostnameVerifier { _, _ -> true }
+
+            val url = URI.create("https://file.io").toURL()
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.doOutput = true
+            connection.connectTimeout = 30000
+            connection.readTimeout = 90000
+            
+            val boundary = "Boundary-" + System.currentTimeMillis()
+            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            
+            connection.outputStream.use { output ->
+                output.write(("--$boundary\r\n").toByteArray())
+                output.write(("Content-Disposition: form-data; name=\"file\"; filename=\"app-debug.apk\"\r\n").toByteArray())
+                output.write(("Content-Type: application/vnd.android.package-archive\r\n\r\n").toByteArray())
+                
+                val totalBytes = destFile.length()
+                var uploadedBytes = 0L
+                val buffer = ByteArray(65536) // 64KB chunks
+                var lastProgressUpdate = 0L
+                
+                destFile.inputStream().use { input ->
+                    var bytesRead = input.read(buffer)
+                    while (bytesRead != -1) {
+                        output.write(buffer, 0, bytesRead)
+                        uploadedBytes += bytesRead
+                        val currentTime = System.currentTimeMillis()
+                        if (currentTime - lastProgressUpdate > 3000) {
+                            val percentage = (uploadedBytes * 100) / totalBytes
+                            log("Progress: $percentage% ($uploadedBytes / $totalBytes bytes uploaded)")
+                            lastProgressUpdate = currentTime
+                        }
+                        bytesRead = input.read(buffer)
+                    }
+                }
+                
+                output.write(("\r\n--$boundary--\r\n").toByteArray())
+                output.flush()
+            }
+            
+            val responseCode = connection.responseCode
+            log("HTTP Response Code: $responseCode")
+            val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
+            val responseText = stream?.bufferedReader()?.use { it.readText() } ?: "No response body"
+            log("Server Response:\n$responseText")
+            
+            val jsonUrlRegex = Regex("\"link\"\\s*:\\s*\"([^\"]+)\"")
+            val match = jsonUrlRegex.find(responseText)
+            val extractedLink = match?.groupValues?.get(1)?.replace("\\/", "/")
+            
+            if (responseCode in 200..299 && extractedLink != null && extractedLink.startsWith("http")) {
+                linkFile.writeText(extractedLink)
+                log("--- UPLOAD SUCCESSFUL ---")
+                log("Saved Transfer Link to ${linkFile.absolutePath}")
+                log("Download Link: $extractedLink")
+                log("-------------------------")
+            } else {
+                log("Upload failed: Response status $responseCode. Body does not contain valid link.")
+            }
+        } catch (e: Exception) {
+            log("Upload failed with exception: ${e.message}")
+            val sw = StringWriter()
+            e.printStackTrace(PrintWriter(sw))
+            log(sw.toString())
+        } finally {
+            logFile.writeText(logBuilder.toString())
         }
     }
 }

@@ -1,21 +1,18 @@
 # Add project specific ProGuard rules here.
 # You can control the set of applied configuration files using the
 # proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Keep Retrofit and OkHttp
+-keepattributes Signature, InnerClasses, AnnotationDefault, EnclosingMethod
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn retrofit2.**
+-dontwarn java.beans.**
+-dontwarn org.mozilla.javascript.**
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Keep NewPipe Extractor classes so they are not broken by minification
+-keep class org.schabi.newpipe.** { *; }
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Keep app models and user package
+-keep class com.example.** { *; }
+
